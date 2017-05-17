@@ -24,19 +24,18 @@ import org.jetbrains.annotations.NotNull;
 import org.w3c.dom.Document;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
-import org.xml.sax.SAXException;
 import util.NotificationUtil;
 
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
-import javax.xml.parsers.ParserConfigurationException;
 import javax.xml.transform.Transformer;
-import javax.xml.transform.TransformerConfigurationException;
-import javax.xml.transform.TransformerException;
 import javax.xml.transform.TransformerFactory;
 import javax.xml.transform.dom.DOMSource;
 import javax.xml.transform.stream.StreamResult;
-import javax.xml.xpath.*;
+import javax.xml.xpath.XPath;
+import javax.xml.xpath.XPathConstants;
+import javax.xml.xpath.XPathExpression;
+import javax.xml.xpath.XPathFactory;
 import java.io.*;
 import java.util.Properties;
 import java.util.Set;
@@ -91,12 +90,11 @@ public class NetbeansFileConverter implements ProjectFileConverter {
 
                 moduleLibraries += "</root>";
 
-                includeLibraryToIntellij(moduleLibraries, contentWithLibraryRemoved);
+                resolveIntellijLibrary(moduleLibraries, contentWithLibraryRemoved);
 
             } catch (IOException e) {
                 e.printStackTrace();
             }
-
         }
 
         NotificationUtil.notify("Converted " + module.getName() + " DONE");
@@ -107,19 +105,13 @@ public class NetbeansFileConverter implements ProjectFileConverter {
             return null;
         }
 
-        String relPath = module.getModuleFilePath().substring(0, module.getModuleFilePath().lastIndexOf(File.separator));
-        String path = relPath + File.separator + module.getName() + ".iml";
-        VirtualFile intellijProjectFile = module.getProject().getBaseDir().getFileSystem().findFileByPath(path);
-
-        PsiFile moduleFile = PsiManager.getInstance(module.getProject()).findFile(intellijProjectFile);
-
         DocumentBuilderFactory dbFactory = DocumentBuilderFactory.newInstance();
         DocumentBuilder dBuilder = null;
         FileOutputStream os = null;
 
         try {
-
-            InputStream inputStream = moduleFile.getVirtualFile().getInputStream();
+            PsiFile moduleImlFile = getModuleImlFile();
+            InputStream inputStream = moduleImlFile.getVirtualFile().getInputStream();
 
             dBuilder = dbFactory.newDocumentBuilder();
             Document doc = dBuilder.parse(inputStream);
@@ -137,7 +129,6 @@ public class NetbeansFileConverter implements ProjectFileConverter {
                 item.getParentNode().removeChild(item);
             }
 
-            os = new FileOutputStream(new File(path), false);
             TransformerFactory tf = TransformerFactory.newInstance();
             Transformer t = tf.newTransformer();
             ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
@@ -146,17 +137,7 @@ public class NetbeansFileConverter implements ProjectFileConverter {
             t.reset();
 
             return byteArrayOutputStream.toByteArray();
-        } catch (ParserConfigurationException | NullPointerException e) {
-            e.printStackTrace();
-        } catch (SAXException e) {
-            e.printStackTrace();
-        } catch (IOException e) {
-            e.printStackTrace();
-        } catch (XPathExpressionException e) {
-            e.printStackTrace();
-        } catch (TransformerConfigurationException e) {
-            e.printStackTrace();
-        } catch (TransformerException e) {
+        } catch (Exception e) {
             e.printStackTrace();
         }
 
@@ -179,20 +160,15 @@ public class NetbeansFileConverter implements ProjectFileConverter {
         return configuration;
     }
 
-    private void includeLibraryToIntellij(String input, byte[] contentWithLibraryRemoved) throws IOException {
+    private void resolveIntellijLibrary(String input, byte[] contentWithLibraryRemoved) throws IOException {
         if (module == null) {
             return;
         }
 
-        String relPath = module.getModuleFilePath().substring(0, module.getModuleFilePath().lastIndexOf(File.separator));
-        String path = relPath + File.separator + module.getName() + ".iml";
-        VirtualFile intellijProjectFile = module.getProject().getBaseDir().getFileSystem().findFileByPath(path);
-
-        if (intellijProjectFile == null) {
-            Messages.showInfoMessage(path, "Intellij Project file not found.");
+        if(!isModuleImlFileExist()) {
+            Messages.showInfoMessage(module.getModuleFilePath(), "Intellij Project file not found.");
             return;
         }
-
 
         DocumentBuilderFactory dbFactory = DocumentBuilderFactory.newInstance();
         DocumentBuilder dBuilder = null;
@@ -201,7 +177,6 @@ public class NetbeansFileConverter implements ProjectFileConverter {
         try {
 
             InputStream inputStream = new ByteArrayInputStream(contentWithLibraryRemoved);
-
             dBuilder = dbFactory.newDocumentBuilder();
             Document doc = dBuilder.parse(inputStream);
 
@@ -220,14 +195,11 @@ public class NetbeansFileConverter implements ProjectFileConverter {
                 for (int i = 0; i < childNodes.getLength(); ++i) {
                     Node dependency = childNodes.item(i);
                     dependency = doc.importNode(dependency, true);
-
                     node.appendChild(dependency);
                 }
-
-
             }
 
-            os = new FileOutputStream(new File(path), false);
+            os = new FileOutputStream(new File(module.getModuleFilePath()), false);
             TransformerFactory tf = TransformerFactory.newInstance();
             Transformer t = tf.newTransformer();
             ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
@@ -238,17 +210,7 @@ public class NetbeansFileConverter implements ProjectFileConverter {
             os.write(byteArrayOutputStream.toByteArray());
             os.flush();
 
-        } catch (ParserConfigurationException | NullPointerException e) {
-            e.printStackTrace();
-        } catch (SAXException e) {
-            e.printStackTrace();
-        } catch (IOException e) {
-            e.printStackTrace();
-        } catch (XPathExpressionException e) {
-            e.printStackTrace();
-        } catch (TransformerConfigurationException e) {
-            e.printStackTrace();
-        } catch (TransformerException e) {
+        } catch (Exception e) {
             e.printStackTrace();
         } finally {
             if (os != null) try {
@@ -259,5 +221,21 @@ public class NetbeansFileConverter implements ProjectFileConverter {
         }
     }
 
+    private boolean isModuleImlFileExist() {
+        String relPath = module.getModuleFilePath().substring(0, module.getModuleFilePath().lastIndexOf(File.separator));
+        String path = relPath + File.separator + module.getName() + ".iml";
+        VirtualFile moduleImlFile = module.getProject().getBaseDir().getFileSystem().findFileByPath(path);
 
+        return (moduleImlFile != null);
+    }
+
+
+    private PsiFile getModuleImlFile() {
+        String relPath = module.getModuleFilePath().substring(0, module.getModuleFilePath().lastIndexOf(File.separator));
+        String path = relPath + File.separator + module.getName() + ".iml";
+        VirtualFile moduleImlFile = module.getProject().getBaseDir().getFileSystem().findFileByPath(path);
+
+        PsiFile moduleFile = PsiManager.getInstance(module.getProject()).findFile(moduleImlFile);
+        return moduleFile;
+    }
 }

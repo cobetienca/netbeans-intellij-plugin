@@ -27,9 +27,9 @@ public class NetbeansModuleComponent implements ModuleComponent {
     private Module myModule;
 
     public NetbeansModuleComponent(Module module) {
-        MyModuleRootListener myModuleRootListener = new MyModuleRootListener();
+        MyModuleListener myModuleListener = new MyModuleListener();
         this.myModule = module;
-        this.myModule.getProject().getMessageBus().connect().subscribe(ProjectTopics.MODULES, myModuleRootListener);
+        this.myModule.getProject().getMessageBus().connect().subscribe(ProjectTopics.MODULES, myModuleListener);
 
         VirtualFileListener f = new MyArtifactVirtualFileListener(myModule.getProject(), new ArtifactManagerImpl(myModule.getProject()));
         LocalFileSystem.getInstance().addVirtualFileListener(f);
@@ -97,12 +97,9 @@ public class NetbeansModuleComponent implements ModuleComponent {
                 }
             });
         }
-
-
     }
 
-    private class MyModuleRootListener implements ModuleListener {
-
+    private class MyModuleListener implements ModuleListener {
         @Override
         public void moduleRemoved(@NotNull Project project, @NotNull Module module) {
             myModule = null;
@@ -125,7 +122,7 @@ public class NetbeansModuleComponent implements ModuleComponent {
         @Override
         public void fileCreated(@NotNull VirtualFileEvent event) {
             super.fileCreated(event);
-            System.out.println(event.getFileName());
+            logger.debug(event.getFileName());
 
             if(myModule != null && event.getFileName().equals(myModule.getName() + ".iml")) {
                 NotificationUtil.notify("file created=" + event.getFileName());
