@@ -16,7 +16,6 @@
 package converter;
 
 import com.intellij.openapi.module.Module;
-import com.intellij.psi.PsiFile;
 
 /**
  * Created by trangdp on 16/05/2017.

@@ -15,11 +15,20 @@
  */
 package converter;
 
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
+import com.intellij.openapi.module.OrderEntryNavigatable;
+import com.intellij.openapi.roots.LibraryOrderEntry;
+import com.intellij.openapi.roots.OrderEntry;
+import com.intellij.openapi.roots.OrderEnumerator;
+import com.intellij.openapi.roots.RootProvider;
+import com.intellij.openapi.roots.impl.ModuleLibraryOrderEntryImpl;
+import com.intellij.openapi.roots.libraries.Library;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiManager;
+import com.intellij.util.Processor;
 import org.jetbrains.annotations.NotNull;
 import org.w3c.dom.Document;
 import org.w3c.dom.Node;
@@ -37,13 +46,18 @@ import javax.xml.xpath.XPathConstants;
 import javax.xml.xpath.XPathExpression;
 import javax.xml.xpath.XPathFactory;
 import java.io.*;
+import java.security.NoSuchAlgorithmException;
 import java.util.Properties;
 import java.util.Set;
 
 /**
  * Created by trangdp on 16/05/2017.
+ *
+ * This class is to convert netbeans dependencies to intellij module & build ANT run file + Intellij run file
  */
-public class NetbeansFileConverter implements ProjectFileConverter {
+public class NetbeansToIntellijConverter implements ProjectFileConverter {
+    private final Logger logger = Logger.getInstance("com.trangdp.NetbeansToIntellijConverter");
+
     @NotNull
     private Module module;
 
@@ -64,40 +78,55 @@ public class NetbeansFileConverter implements ProjectFileConverter {
         byte[] contentWithLibraryRemoved = clearIntellijModuleLibrary();
 
         if (contentWithLibraryRemoved != null) {
+            Properties properties = new Properties();
             InputStream is = new ByteArrayInputStream(projectFileContent.getBytes());
             String moduleLibraries = "<root>";
             try {
-                Properties properties = new Properties();
                 properties.load(is);
+            } catch (IOException e) {
+                logger.error("Unable to load netbeans properties. Is it valid?", e);
+                return;
+            }
 
-                Set<String> propertyNames = properties.stringPropertyNames();
-                for (String name : propertyNames) {
-                    if (name.startsWith("javac.classpath")) {
-                        String classPath = properties.getProperty(name);
-                        String[] referenceClasses = classPath.split(":");
-                        for (String reference : referenceClasses) {
-                            reference = reference.replace("${", "").replace("}", "");
-                            String pathToJar = properties.getProperty(reference);
-                            if (pathToJar.startsWith("lib/") || pathToJar.startsWith("libs/")) {
+            Set<String> propertyNames = properties.stringPropertyNames();
+            for (String name : propertyNames) {
+                if (name.equals("javac.classpath")) {
+                    String classPath = properties.getProperty(name);
+                    String[] referenceClasses = classPath.split(":");
+                    for (String reference : referenceClasses) {
+                        reference = reference.replace("${", "").replace("}", "");
+                        String pathToJar = properties.getProperty(reference);
+                        if(pathToJar != null ) {
+                            if ((pathToJar.startsWith("lib/") || pathToJar.startsWith("libs/"))) {
                                 pathToJar = "$MODULE_DIR$/" + pathToJar;
                                 NotificationUtil.notify(pathToJar);
                             }
 
                             moduleLibraries += extractNetbeansLibrary(pathToJar);
                         }
+
+
+
                     }
                 }
+            }
 
-                moduleLibraries += "</root>";
+            moduleLibraries += "</root>";
 
-                resolveIntellijLibrary(moduleLibraries, contentWithLibraryRemoved);
+            resolveIntellijLibrary(moduleLibraries, contentWithLibraryRemoved);
 
-            } catch (IOException e) {
-                e.printStackTrace();
+            try {
+                storeChecksumIml();
+            } catch (IOException | NoSuchAlgorithmException e) {
+                logger.error("Checksum failed", e);
             }
         }
 
         NotificationUtil.notify("Converted " + module.getName() + " DONE");
+    }
+
+    private void storeChecksumIml() throws IOException, NoSuchAlgorithmException {
+        IntellijModuleImlChecksum.getInstance().updateLastChecksum(module.getName(), module.getModuleFilePath());
     }
 
     private byte[] clearIntellijModuleLibrary() {
@@ -138,7 +167,7 @@ public class NetbeansFileConverter implements ProjectFileConverter {
 
             return byteArrayOutputStream.toByteArray();
         } catch (Exception e) {
-            e.printStackTrace();
+            logger.error("Error processing DOM .iml file", e);
         }
 
         return null;
@@ -160,12 +189,12 @@ public class NetbeansFileConverter implements ProjectFileConverter {
         return configuration;
     }
 
-    private void resolveIntellijLibrary(String input, byte[] contentWithLibraryRemoved) throws IOException {
+    private void resolveIntellijLibrary(String input, byte[] contentWithLibraryRemoved) {
         if (module == null) {
             return;
         }
 
-        if(!isModuleImlFileExist()) {
+        if (!isModuleImlFileExist()) {
             Messages.showInfoMessage(module.getModuleFilePath(), "Intellij Project file not found.");
             return;
         }
@@ -185,7 +214,7 @@ public class NetbeansFileConverter implements ProjectFileConverter {
             doc.getDocumentElement().normalize();
             XPathFactory xpf = XPathFactory.newInstance();
             XPath xpath = xpf.newXPath();
-            XPathExpression expression = xpath.compile("/module/component");
+            XPathExpression expression = xpath.compile("//module/component[@name=\"NewModuleRootManager\"]");
             Node node = (Node) expression.evaluate(doc, XPathConstants.NODE);
 
             if (node != null) {
@@ -211,7 +240,7 @@ public class NetbeansFileConverter implements ProjectFileConverter {
             os.flush();
 
         } catch (Exception e) {
-            e.printStackTrace();
+            logger.error("Error resolving libraries", e);
         } finally {
             if (os != null) try {
                 os.close();
@@ -228,7 +257,6 @@ public class NetbeansFileConverter implements ProjectFileConverter {
 
         return (moduleImlFile != null);
     }
-
 
     private PsiFile getModuleImlFile() {
         String relPath = module.getModuleFilePath().substring(0, module.getModuleFilePath().lastIndexOf(File.separator));

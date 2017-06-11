@@ -22,10 +22,12 @@ public class ConverterFactory {
 
     public ProjectFileConverter getConverter(String type) {
         switch(type) {
-            case "netbeans":
-                return new NetbeansFileConverter();
+            case "netbeans-to-intellij":
+                return new NetbeansToIntellijConverter();
+            case "intellij-to-netbeans":
+                return new IntellijToNetbeansConverter();
             default:
-                return new NetbeansFileConverter();
+                return new NetbeansToIntellijConverter();
         }
     }
 
