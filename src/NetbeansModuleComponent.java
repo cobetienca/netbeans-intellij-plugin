@@ -164,7 +164,6 @@ public class NetbeansModuleComponent implements ModuleComponent {
 
             Module module = ModuleUtilCore.findModuleForFile(event.getFile(), project);
 
-
             //monitor content change for file <modulename>.iml
             if(module != null && event.getFileName().equals(module.getName() + ".iml")) {
                 NotificationUtil.notify("file " + event.getFileName() + " content has changed");
@@ -173,7 +172,7 @@ public class NetbeansModuleComponent implements ModuleComponent {
                 try {
                     String lastChecksum = IntellijModuleImlChecksum.getInstance().getLastCheckSum(module.getName());
                     String currentChecksum = IntellijModuleImlChecksum.getInstance().checksum(module.getModuleFilePath());
-                    if(!currentChecksum.equals(lastChecksum)) {
+                    if(lastChecksum != null && !lastChecksum.isEmpty() && !currentChecksum.isEmpty() && !currentChecksum.equals(lastChecksum)) {
                         ProjectFileConverter converter = new ConverterFactory().getConverter("intellij-to-netbeans");
                         converter.setModule(module);
                         converter.setProjectFileContent(new String(module.getModuleFile().contentsToByteArray()));
