@@ -18,6 +18,7 @@ package converter;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.OrderEntryNavigatable;
+import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.LibraryOrderEntry;
 import com.intellij.openapi.roots.OrderEntry;
 import com.intellij.openapi.roots.OrderEnumerator;
@@ -33,18 +34,19 @@ import org.jetbrains.annotations.NotNull;
 import org.w3c.dom.Document;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
+import org.xml.sax.SAXException;
 import util.NotificationUtil;
 
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.parsers.ParserConfigurationException;
 import javax.xml.transform.Transformer;
+import javax.xml.transform.TransformerConfigurationException;
+import javax.xml.transform.TransformerException;
 import javax.xml.transform.TransformerFactory;
 import javax.xml.transform.dom.DOMSource;
 import javax.xml.transform.stream.StreamResult;
-import javax.xml.xpath.XPath;
-import javax.xml.xpath.XPathConstants;
-import javax.xml.xpath.XPathExpression;
-import javax.xml.xpath.XPathFactory;
+import javax.xml.xpath.*;
 import java.io.*;
 import java.security.NoSuchAlgorithmException;
 import java.util.Properties;
@@ -115,6 +117,8 @@ public class NetbeansToIntellijConverter implements ProjectFileConverter {
 
             resolveIntellijLibrary(moduleLibraries, contentWithLibraryRemoved);
 
+            generateRunConfiguration(properties);
+
             try {
                 storeChecksumIml();
             } catch (IOException | NoSuchAlgorithmException e) {
@@ -123,6 +127,64 @@ public class NetbeansToIntellijConverter implements ProjectFileConverter {
         }
 
         NotificationUtil.notify("Converted " + module.getName() + " DONE");
+    }
+
+    private void generateRunConfiguration(Properties properties) {
+        Project project = module.getProject();
+        VirtualFile workspaceFile = project.getWorkspaceFile();
+        DocumentBuilderFactory dbFactory = DocumentBuilderFactory.newInstance();
+        DocumentBuilder dBuilder = null;
+        FileOutputStream os = null;
+        String moduleXpath = "contains(@value, '"  + module.getName() + "')]";
+        String xpathMatcher = "//component[@name=\"RunManager\"]/configuration/option[@name='WORKING_DIRECTORY' and " + moduleXpath;
+
+        System.out.println(xpathMatcher);
+
+        try {
+            dBuilder = dbFactory.newDocumentBuilder();
+            Document doc = dBuilder.parse(workspaceFile.getInputStream());
+            XPathFactory xpf = XPathFactory.newInstance();
+            XPath xpath = xpf.newXPath();
+            XPathExpression expression = xpath.compile(xpathMatcher);
+            Node nl = (Node) expression.evaluate(doc, XPathConstants.NODE);
+
+            if(nl == null) {
+                //main.class=com.vng.zing.oa.app.MainApp
+                //TODO create new configuration
+                String mainClass = properties.getProperty("main.class");
+                String jvmArg = properties.getProperty("run.jvmargs");
+                String runConfiguration = getRunConfiguration(module, mainClass, jvmArg);
+
+                System.out.println(runConfiguration);
+
+                expression = xpath.compile("//component[@name='RunManager']");
+                Node runManager = (Node) expression.evaluate(doc, XPathConstants.NODE);
+
+                if(runManager != null) {
+//                    runManager.appendChild(doc.cre(runConfiguration));
+
+                    os = new FileOutputStream(new File(module.getProject().getWorkspaceFile().getCanonicalPath()), false);
+                    TransformerFactory tf = TransformerFactory.newInstance();
+                    Transformer t = tf.newTransformer();
+                    ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+
+                    t.transform(new DOMSource(doc), new StreamResult(byteArrayOutputStream));
+                    t.reset();
+
+
+                    os.write(byteArrayOutputStream.toByteArray());
+                    os.flush();
+                }
+            }
+        } catch (Exception e) {
+            if(os != null) {
+                try {
+                    os.close();
+                } catch (IOException e1) {
+                    e1.printStackTrace();
+                }
+            }
+        }
     }
 
     private void storeChecksumIml() throws IOException, NoSuchAlgorithmException {
@@ -265,5 +327,29 @@ public class NetbeansToIntellijConverter implements ProjectFileConverter {
 
         PsiFile moduleFile = PsiManager.getInstance(module.getProject()).findFile(moduleImlFile);
         return moduleFile;
+    }
+
+    private String getRunConfiguration(Module module, String mainClass, String jvmArg) {
+        String modulePath = module.getModuleFile().getPath().replace(module.getName() + ".iml", "");
+        String moduleName = module.getName();
+        return "<configuration default=\"false\" name=\"" + moduleName + "\" type=\"Application\" factoryName=\"Application\">\n" +
+                "      <extension name=\"coverage\" enabled=\"false\" merge=\"false\" sample_coverage=\"true\" runner=\"idea\" />\n" +
+                "      <option name=\"MAIN_CLASS_NAME\" value=\""+ mainClass +"\" />\n" +
+                "      <option name=\"VM_PARAMETERS\" value=\""+ jvmArg +"\" />\n" +
+                "      <option name=\"PROGRAM_PARAMETERS\" value=\"\" />\n" +
+                "      <option name=\"WORKING_DIRECTORY\" value=\"file:/"+ modulePath + "\" />\n" +
+                "      <option name=\"ALTERNATIVE_JRE_PATH_ENABLED\" value=\"false\" />\n" +
+                "      <option name=\"ALTERNATIVE_JRE_PATH\" />\n" +
+                "      <option name=\"ENABLE_SWING_INSPECTOR\" value=\"false\" />\n" +
+                "      <option name=\"ENV_VARIABLES\" />\n" +
+                "      <option name=\"PASS_PARENT_ENVS\" value=\"true\" />\n" +
+                "      <module name=\""+ moduleName +"\" />\n" +
+                "      <envs />\n" +
+                "      <method />\n" +
+                "    </configuration>" +
+                "   <configuration default=\"false\" name=\"" + moduleName + "\" type=\"AntRunConfiguration\" factoryName=\"Ant Target\">\n" +
+                "      <antsettings antfile=\"file:/" + modulePath + "/build.xml\" target=\"default\" />\n" +
+                "      <method />\n" +
+                "    </configuration>";
     }
 }
